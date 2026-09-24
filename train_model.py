@@ -1,16 +1,38 @@
 import pandas as pd
+import joblib
 
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import IsolationForest
+
+# Load dataset
 df = pd.read_csv("data/creditcard.csv")
 
-print("Dataset Shape:", df.shape)
-print("\nColumns:")
-print(df.columns)
+# Separate features
+X = df.drop("Class", axis=1)
 
-print("\nFirst 5 rows:")
-print(df.head())
+# Scale Time and Amount
+scaler = StandardScaler()
 
-print("\nMissing values:")
-print(df.isnull().sum())
+X[["Time", "Amount"]] = scaler.fit_transform(
+    X[["Time", "Amount"]]
+)
 
-print("\nClass distribution:")
-print(df["Class"].value_counts())
+# Create Isolation Forest
+model = IsolationForest(
+    n_estimators=200,
+    contamination=0.001727,
+    random_state=42,
+    n_jobs=-1
+)
+
+# Train
+model.fit(X)
+
+# Save model and scaler
+joblib.dump(model, "models/isolation_forest.pkl")
+joblib.dump(scaler, "models/scaler.pkl")
+
+print("Model trained successfully!")
+print("Model saved to models/isolation_forest.pkl")
+print("Scaler saved to models/scaler.pkl")
+
