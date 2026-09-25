@@ -2,6 +2,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import time
+
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
 
 st.set_page_config(
     page_title="FraudShield",
@@ -9,34 +14,37 @@ st.set_page_config(
     layout="wide"
 )
 
-# Load model
+# ---------------------------------------------------
+# LOAD MODEL
+# ---------------------------------------------------
+
 model = joblib.load("models/isolation_forest.pkl")
 scaler = joblib.load("models/scaler.pkl")
 
-# Load dataset for dashboard statistics
 df = pd.read_csv("data/creditcard.csv")
 
-# -----------------------------
+# ---------------------------------------------------
 # HEADER
-# -----------------------------
+# ---------------------------------------------------
 
 st.title("🛡️ FraudShield")
 st.subheader("Real-Time Transaction Anomaly Detection")
 
 st.write(
-    "Machine learning based system for identifying potentially "
-    "suspicious financial transactions."
+    "An ML-powered fraud monitoring system that detects potentially "
+    "suspicious financial transactions using Isolation Forest."
 )
 
 st.divider()
 
-# -----------------------------
-# DASHBOARD METRICS
-# -----------------------------
+# ---------------------------------------------------
+# DATASET STATISTICS
+# ---------------------------------------------------
 
 total_transactions = len(df)
-normal_transactions = (df["Class"] == 0).sum()
-fraud_transactions = (df["Class"] == 1).sum()
+normal_transactions = int((df["Class"] == 0).sum())
+fraud_transactions = int((df["Class"] == 1).sum())
+fraud_rate = (fraud_transactions / total_transactions) * 100
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -59,8 +67,6 @@ with col3:
     )
 
 with col4:
-    fraud_rate = (fraud_transactions / total_transactions) * 100
-
     st.metric(
         "Fraud Rate",
         f"{fraud_rate:.3f}%"
@@ -68,65 +74,50 @@ with col4:
 
 st.divider()
 
-# -----------------------------
-# TRANSACTION INPUT
-# -----------------------------
+# ---------------------------------------------------
+# LIVE MONITORING
+# ---------------------------------------------------
 
-st.header("🔍 Transaction Analysis")
+st.header("🔴 Live Transaction Monitor")
 
 st.write(
-    "Enter the transaction information below to check "
-    "whether it appears anomalous."
+    "Simulate incoming transactions and automatically classify "
+    "them as normal or potentially anomalous."
 )
 
-col1, col2 = st.columns(2)
+# Initialize session state
+if "transactions" not in st.session_state:
+    st.session_state.transactions = []
 
-with col1:
+if "total_checked" not in st.session_state:
+    st.session_state.total_checked = 0
 
-    transaction_time = st.number_input(
-        "Transaction Time",
-        min_value=0.0,
-        value=50000.0
-    )
+if "suspicious_count" not in st.session_state:
+    st.session_state.suspicious_count = 0
 
-    amount = st.number_input(
-        "Transaction Amount",
-        min_value=0.0,
-        value=100.0
-    )
+if "normal_count" not in st.session_state:
+    st.session_state.normal_count = 0
 
-with col2:
-
-    st.info(
-        "The dataset contains anonymized V1–V28 features. "
-        "For the demo, representative values are used."
-    )
-
-# V1-V28 inputs
-feature_values = []
-
-for i in range(1, 29):
-
-    value = st.number_input(
-        f"V{i}",
-        value=0.0
-    )
-
-    feature_values.append(value)
-
-# -----------------------------
-# PREDICTION
-# -----------------------------
+# ---------------------------------------------------
+# GENERATE TRANSACTION
+# ---------------------------------------------------
 
 if st.button(
-    "🚨 Analyze Transaction",
+    "🚨 Analyze New Transaction",
     use_container_width=True
 ):
 
+    # Select a random transaction from the dataset
+    sample = df.sample(1).iloc[0]
+
+    transaction_time = sample["Time"]
+    amount = sample["Amount"]
+
+    # Create feature dataframe
     input_data = pd.DataFrame(
         [[
             transaction_time,
-            *feature_values,
+            *[sample[f"V{i}"] for i in range(1, 29)],
             amount
         ]],
         columns=[
@@ -147,44 +138,196 @@ if st.button(
     # Anomaly score
     score = model.decision_function(input_data)[0]
 
-    st.divider()
-
+    # Convert prediction
     if prediction == -1:
+        status = "SUSPICIOUS"
+        st.session_state.suspicious_count += 1
+    else:
+        status = "NORMAL"
+        st.session_state.normal_count += 1
 
-        st.error("⚠️ SUSPICIOUS TRANSACTION")
+    st.session_state.total_checked += 1
 
+    # Actual class from dataset
+    actual = "FRAUD" if sample["Class"] == 1 else "NORMAL"
+
+    # Store result
+    transaction = {
+        "Transaction ID": st.session_state.total_checked,
+        "Amount": round(amount, 2),
+        "Anomaly Score": round(score, 4),
+        "Prediction": status,
+        "Actual": actual
+    }
+
+    st.session_state.transactions.insert(0, transaction)
+
+# ---------------------------------------------------
+# LIVE RESULT
+# ---------------------------------------------------
+
+if st.session_state.transactions:
+
+    latest = st.session_state.transactions[0]
+
+    st.subheader("Latest Transaction")
+
+    result_col1, result_col2, result_col3, result_col4 = st.columns(4)
+
+    with result_col1:
+        st.metric(
+            "Transaction ID",
+            latest["Transaction ID"]
+        )
+
+    with result_col2:
+        st.metric(
+            "Amount",
+            f"${latest['Amount']:.2f}"
+        )
+
+    with result_col3:
         st.metric(
             "Anomaly Score",
-            f"{score:.4f}"
+            latest["Anomaly Score"]
+        )
+
+    with result_col4:
+        if latest["Prediction"] == "SUSPICIOUS":
+            st.error("⚠️ SUSPICIOUS")
+        else:
+            st.success("✅ NORMAL")
+
+    if latest["Prediction"] == "SUSPICIOUS":
+
+        st.error(
+            "⚠️ ALERT: Potentially anomalous transaction detected!"
         )
 
         st.write(
-            "The transaction shows characteristics that "
-            "differ significantly from normal transaction patterns."
+            "The transaction shows characteristics that differ "
+            "from normal transaction patterns."
         )
 
     else:
 
-        st.success("✅ NORMAL TRANSACTION")
-
-        st.metric(
-            "Anomaly Score",
-            f"{score:.4f}"
+        st.success(
+            "✅ Transaction appears normal."
         )
 
-        st.write(
-            "The transaction does not appear anomalous "
-            "according to the trained model."
-        )
+# ---------------------------------------------------
+# SESSION STATISTICS
+# ---------------------------------------------------
 
 st.divider()
 
-# -----------------------------
-# DATA VISUALIZATION
-# -----------------------------
+st.header("📊 Session Monitoring")
 
-st.header("📊 Transaction Overview")
+session_col1, session_col2, session_col3 = st.columns(3)
 
-chart_data = df["Class"].value_counts()
+with session_col1:
+    st.metric(
+        "Transactions Checked",
+        st.session_state.total_checked
+    )
 
-st.bar_chart(chart_data)
+with session_col2:
+    st.metric(
+        "Suspicious Detected",
+        st.session_state.suspicious_count
+    )
+
+with session_col3:
+    st.metric(
+        "Normal Detected",
+        st.session_state.normal_count
+    )
+
+# ---------------------------------------------------
+# RECENT TRANSACTIONS
+# ---------------------------------------------------
+
+if st.session_state.transactions:
+
+    st.divider()
+
+    st.header("📋 Recent Transactions")
+
+    transaction_df = pd.DataFrame(
+        st.session_state.transactions
+    )
+
+    st.dataframe(
+        transaction_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+# ---------------------------------------------------
+# ANOMALY DISTRIBUTION
+# ---------------------------------------------------
+
+if st.session_state.transactions:
+
+    st.divider()
+
+    st.header("📈 Anomaly Monitoring")
+
+    chart_df = pd.DataFrame(
+        {
+            "Normal": [
+                st.session_state.normal_count
+            ],
+            "Suspicious": [
+                st.session_state.suspicious_count
+            ]
+        }
+    )
+
+    st.bar_chart(chart_df)
+
+# ---------------------------------------------------
+# DATASET OVERVIEW
+# ---------------------------------------------------
+
+st.divider()
+
+st.header("📊 Dataset Overview")
+
+overview_col1, overview_col2 = st.columns(2)
+
+with overview_col1:
+
+    class_counts = df["Class"].value_counts()
+
+    chart_data = pd.DataFrame(
+        {
+            "Transactions": [
+                class_counts.get(0, 0),
+                class_counts.get(1, 0)
+            ]
+        },
+        index=["Normal", "Fraud"]
+    )
+
+    st.bar_chart(chart_data)
+
+with overview_col2:
+
+    st.write("### Model Information")
+
+    st.write("**Algorithm:** Isolation Forest")
+    st.write("**Learning Type:** Unsupervised Anomaly Detection")
+    st.write("**Trees:** 200")
+    st.write("**Features:** Time + V1–V28 + Amount")
+    st.write("**Detection:** Anomaly Score")
+
+# ---------------------------------------------------
+# FOOTER
+# ---------------------------------------------------
+
+st.divider()
+
+st.caption(
+    "FraudShield | Machine Learning Based Fraud & Anomaly Detection"
+)
